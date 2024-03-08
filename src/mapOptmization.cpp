@@ -1502,6 +1502,10 @@ public:
         // roll = yaw           ---     roll = pitch
         // pitch = roll         ---     pitch = yaw
         // yaw = pitch          ---     yaw = roll
+        //
+        // zhaokai: 原来的这部分不知道为啥要做这个坐标变换，liorf 是直接对应的，
+
+#if 0
 
         // lidar -> camera
         float srx = sin(transformTobeMapped[1]);
@@ -1560,6 +1564,74 @@ public:
             // 点到直线距离、平面距离，作为观测值
             matB.at<float>(i, 0) = -coeff.intensity;
         }
+#else
+
+        float srx = sin(transformTobeMapped[0]);
+        float crx = cos(transformTobeMapped[0]);
+        float sry = sin(transformTobeMapped[1]);
+        float cry = cos(transformTobeMapped[1]);
+        float srz = sin(transformTobeMapped[2]);
+        float crz = cos(transformTobeMapped[2]);
+
+        int laserCloudSelNum = laserCloudOri->size();
+        if (laserCloudSelNum < 50) {
+            return false;
+        }
+
+        cv::Mat matA(laserCloudSelNum, 6, CV_32F, cv::Scalar::all(0));
+        cv::Mat matAt(6, laserCloudSelNum, CV_32F, cv::Scalar::all(0));
+        cv::Mat matAtA(6, 6, CV_32F, cv::Scalar::all(0));
+        cv::Mat matB(laserCloudSelNum, 1, CV_32F, cv::Scalar::all(0));
+        cv::Mat matAtB(6, 1, CV_32F, cv::Scalar::all(0));
+        cv::Mat matX(6, 1, CV_32F, cv::Scalar::all(0));
+
+        PointType coeff; //系数
+
+        for (int i = 0; i < laserCloudSelNum; i++) {
+            // lidar -> camera
+            cv::Matx31f point_ori( laserCloudOri->points[i].x, laserCloudOri->points[i].y, laserCloudOri->points[i].z);
+            // lidar -> camera
+            coeff.x = coeffSel->points[i].x;
+            coeff.y = coeffSel->points[i].y;
+            coeff.z = coeffSel->points[i].z;
+            coeff.intensity = coeffSel->points[i].intensity;
+            cv::Matx13f feature_coeff( coeffSel->points[i].x, coeffSel->points[i].y, coeffSel->points[i].z);
+            // in camera
+
+            cv::Matx33f dR_drx( 
+                0,  srx * srz + sry * crx * crz, -srx * sry * crz + srz * crx,
+                0, -srx * crz + sry * srz * crx, -srx * sry * srz - crx * crz,
+                0,  crx * cry,                   -srx * cry
+            );
+
+            cv::Matx33f dR_dry( 
+                -sry * crz,  srx * cry * crz,  crx * cry * crz,
+                -sry * srz,  srx * srz * cry,  srz * crx * cry,
+                -cry,       -srx * sry,       -sry * crx
+            );
+
+            cv::Matx33f dR_drz( 
+                -srz * cry, -srx * sry * srz - crx * crz, srx * crz - sry * srz * crx,
+                 cry * crz,  srx * sry * crz - srz * crx, srx * srz + sry * crx * crz,
+                 0,          0,                           0
+            );
+
+            float arx = (feature_coeff * dR_drx * point_ori)(0);
+            float ary = (feature_coeff * dR_dry * point_ori)(0);
+            float arz = (feature_coeff * dR_drz * point_ori)(0);
+
+              
+            // camera -> lidar
+            matA.at<float>(i, 0) = arx;
+            matA.at<float>(i, 1) = ary;
+            matA.at<float>(i, 2) = arz;
+            matA.at<float>(i, 3) = coeff.x;
+            matA.at<float>(i, 4) = coeff.y;
+            matA.at<float>(i, 5) = coeff.z;
+            // 点到直线距离、平面距离，作为观测值
+            matB.at<float>(i, 0) = -coeff.intensity;
+        }
+#endif
 
         cv::transpose(matA, matAt);
         matAtA = matAt * matA;
